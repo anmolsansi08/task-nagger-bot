@@ -47,10 +47,6 @@ def tg_send_message(text: str):
     r.raise_for_status()
 
 
-def chicago_date_from_unix(unix_ts: int) -> str:
-    return datetime.fromtimestamp(unix_ts, tz=TZ).date().isoformat()
-
-
 def compute_target_date(now: datetime) -> str:
     """
     Reminder window: 7:00 PM -> 2:00 AM (crosses midnight).
@@ -71,8 +67,10 @@ def main():
     last_update_id = int(state.get("last_update_id", 0))
     last_done_date = state.get("last_done_date")
 
-    # 1) Read new messages and look for /done
+    # 1) Read new messages and look for /done or /status
     updates = tg_get_updates(offset=last_update_id + 1)
+    pending_status_request = False
+
     for upd in updates:
         uid = upd.get("update_id", last_update_id)
         last_update_id = max(last_update_id, uid)
@@ -86,26 +84,35 @@ def main():
             continue
 
         text = (msg.get("text") or "").strip().lower()
+
         if text.startswith("/done"):
-            msg_date = msg.get("date")
-            done_date = (
-                chicago_date_from_unix(msg_date)
-                if msg_date
-                else datetime.now(TZ).date().isoformat()
-            )
-            last_done_date = done_date
+            # Mark done for the current target date (handles after-midnight correctly)
+            now_local = datetime.now(TZ)
+            last_done_date = compute_target_date(now_local)
+
+        elif text.startswith("/status"):
+            pending_status_request = True
 
     state["last_update_id"] = last_update_id
     state["last_done_date"] = last_done_date
     save_state(state)
 
-    # 2) Decide whether to remind
+    # 2) Decide whether to remind (and/or answer /status)
     now = datetime.now(TZ)
+    target_date = compute_target_date(now)
+
+    if pending_status_request:
+        if last_done_date == target_date:
+            tg_send_message(f"Status: DONE for {target_date}.")
+        else:
+            tg_send_message(
+                f"Status: NOT done for {target_date}.\n"
+                f"Send /done to mark it complete."
+            )
+        return  # don't also send a reminder in the same run
 
     if not in_reminder_window(now):
         return
-
-    target_date = compute_target_date(now)
 
     # If already done for the target date, stop.
     if last_done_date == target_date:
