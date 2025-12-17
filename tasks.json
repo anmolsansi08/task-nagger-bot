@@ -1,6 +1,4 @@
 {
-  "default": "hanumanji",
-  "tasks": [
-    { "key": "hanumanji", "label": "Hanuman Ji Pooja" }
-  ]
+  "default": null,
+  "tasks": []
 }
